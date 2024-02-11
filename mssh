@@ -1,0 +1,89 @@
+#!/bin/bash
+
+session_file="ssh_sessions.txt"
+
+# Function to load sessions from the file
+load_sessions() {
+    sessions=() # Initialize the sessions array
+    while IFS= read -r line; do
+        sessions+=("$line")
+    done < "$session_file"
+}
+
+# Function to update a session in the file
+update_session() {
+    local index=$1
+    local new_line="$2,$3,$4,$5"
+    local tmp_file=$(mktemp)
+
+    # Update the specified line
+    awk -v idx="$index" -v newline="$new_line" 'BEGIN {FS=OFS=","} NR == idx {$0=newline} {print}' "$session_file" > "$tmp_file" && mv "$tmp_file" "$session_file"
+}
+
+# Function to display sessions in a table format
+display_sessions() {
+    echo "Available SSH Sessions:"
+    echo "| # | Server Name        | User@IP                | Port | Comments"
+    echo "--------------------------------------------------------------------------------"
+    local i=1
+    for session in "${sessions[@]}"; do
+        IFS=',' read -r name ip port comment <<< "$session"
+        printf "| %d | %-18s | %-22s | %-4s | %s\n" "$i" "$name" "$ip" "$port" "$comment"
+        ((i++))
+    done
+    echo "--------------------------------------------------------------------------------"
+    echo "a) Add a new session"
+    echo "d) Delete a session"
+    echo "e) Edit a session"
+    echo "q) Quit"
+}
+
+# Main loop
+while true; do
+    clear
+    load_sessions
+    display_sessions
+    read -p "Enter choice: " choice
+
+    case $choice in
+        [0-9]*)
+            selected_session=${sessions[$((choice-1))]}
+            IFS=',' read -r name ip port comment <<< "$selected_session"
+            echo "Connecting to $ip on port $port..."
+            ssh -p "$port" "$ip"
+            ;;
+        a|A)
+            read -p "Enter server name: " name
+            read -p "Enter user@IP: " ip
+            read -p "Enter port [default: 22]: " port
+            port=${port:-22}
+            read -p "Enter comment: " comment
+            echo "$name,$ip,$port,$comment" >> "$session_file"
+            ;;
+        d|D)
+            read -p "Enter session number to delete: " delete_choice
+            sed -i "" "$delete_choice d" "$session_file" # For Linux, use `sed -i "$delete_choice d" "$session_file"`
+            ;;
+        e|E)
+            read -p "Enter session number to edit: " edit_choice
+            IFS=',' read -r old_name old_ip old_port old_comment <<< "${sessions[$((edit_choice-1))]}"
+            read -p "Enter new server name [$old_name]: " name
+            read -p "Enter new user@IP [$old_ip]: " ip
+            read -p "Enter new port [$old_port]: " port
+            read -p "Enter new comment [$old_comment]: " comment
+            name=${name:-$old_name}
+            ip=${ip:-$old_ip}
+            port=${port:-$old_port}
+            comment=${comment:-$old_comment}
+            update_session "$edit_choice" "$name" "$ip" "$port" "$comment"
+            ;;
+        q|Q)
+            echo "Goodbye!"
+            exit 0
+            ;;
+        *)
+            echo "Invalid choice, please try again."
+            ;;
+    esac
+    read -p "Press Enter to continue..."
+done
